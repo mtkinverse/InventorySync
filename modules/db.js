@@ -1,159 +1,130 @@
-const sqlite3 = require('sqlite3').verbose();
+const mysql = require('mysql2');
+require('dotenv').config();
 
-const db = new sqlite3.Database('./inventory.db', err => {
-    if (err) console.log(err.message)
-    else console.log('successfully connected to the DB')
+const db = mysql.createConnection({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME
 });
 
-db.run("PRAGMA foreign_keys = ON;");
+const connection = db.promise();
 
-db.serialize(() => {
+const DB = {
+    async addProduct(name, category, price, description, store_id, current_stock) {
+        const [result] = await connection.query(
+            `INSERT INTO products (name, category, price, description) VALUES (?, ?, ?, ?)`,
+            [name, category, price, description]
+        );
 
-    db.run(`CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        category TEXT,
-        price REAL NOT NULL,
-        description TEXT,
-        current_stock INTEGER DEFAULT 0 CHECK(current_stock >= 0)
-    )`);
+        const [movement_id] = await connection.query('INSERT INTO stocks (product_id, store_id, stock) VALUES (?, ?, ?)', [result.insertId, store_id, current_stock])
 
+        const [rows] = await connection.query(`SELECT * FROM products WHERE id = ?`, [result.insertId]);
+        return rows[0];
+    },
 
-    db.run(`CREATE TABLE IF NOT EXISTS stock_movements (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER,
-        change INTEGER NOT NULL,
-        reason TEXT CHECK(reason IN ('stock-in', 'sale', 'removed')),
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-    )`);
+    async getAllProduct(storeId) {
+        const [rows] = await connection.query(`SELECT * FROM products p JOIN stocks s ON p.id = s.product_id where s.store_id = ?`, [storeId]);
+        return rows;
+    },
 
-    // The trigger was applied but wasn't able to detect manual removals
+    async getProduct(productId, storeId) {
+        if (!storeId) {
+            const [rows] = await connection.query(`SELECT * FROM products where id = ?  `, [productId]);
+            return rows[0];
+        } else {
+            const [rows] = await connection.query(`SELECT p.*,s1.name as store_name, s1.address as store_address FROM products p JOIN stocks s on s.product_id = p.id JOIN stores s1 on s1.id = s.store_id `, [productId]);
+            return rows[0];
+        }
+    },
 
-    // db.run(`
-    //     CREATE TRIGGER IF NOT EXISTS update_stock_trigger
-    //     AFTER UPDATE OF current_stock ON products
-    //     FOR EACH ROW
-    //     WHEN NEW.current_stock >= 0
-    //     BEGIN
-    //         INSERT INTO stock_movements (product_id, change, reason)
-    //         VALUES (NEW.id, NEW.current_stock - OLD.current_stock,
-    //                 CASE WHEN NEW.current_stock > OLD.current_stock THEN 'stock-in' ELSE 'sale' END);
-    //     END;`);
+    async updateStock(productId, storeId, quantityChange, reason) {
+        try {
+            await connection.beginTransaction();
 
+            const [[product]] = await connection.query(`SELECT * FROM products WHERE id = ?`, [productId]);
+            if (!product) throw new Error('Product not found');
 
+            const [[stock]] = await connection.query('SELECT * from stocks where product_id = ? and store_id = ?', [productId, storeId])
+            console.log('found stock ', stock)
+            const newStock = parseInt(stock.stock) + parseInt(quantityChange);
+            if (newStock < 0) throw new Error('Insufficient stock');
 
-});
+            // console.log('updating product to ', { ...product, current_stock: newStock })
+            // await connection.query(`UPDATE products SET current_stock = ? WHERE id = ?`, [newStock, productId]);
 
-const addProduct = (name, category, price, description, current_stock) => {
-    return new Promise((resolve, reject) => {
-        const sql = `INSERT INTO products (name, category, price, description, current_stock) VALUES (?, ?, ?, ?, ?)`;
-        db.run(sql, [name, category, price, description, current_stock], function (err) {
+            await connection.query(`UPDATE stocks SET stock = ? WHERE store_id = ? and product_id = ?`, [newStock, storeId, productId]);
 
-            const productId = this.lastID
-            if (err) return reject(err);
-            else {
-                if (current_stock > 0) {
-                    const moveQuery = 'INSERT INTO stock_movements (product_id, change, reason) values (?,?,?)'
-                    db.run(moveQuery, [productId, current_stock, 'stock-in'], err2 => {
-                        if (err2) return reject(err2)
-                    })
-                }
-                resolve({ id: productId, name, category, price, description, current_stock });
-            }
-        });
-    });
-};
+            await connection.query(
+                `INSERT INTO stock_movements (product_id, store_id, quantity_changed, reason) VALUES (?, ?, ?, ?)`,
+                [productId, storeId, quantityChange, reason]
+            );
 
-const updateStock = (productId, change, reason) => {
-    console.log('called for ', productId, reason, change)
-    return new Promise((resolve, reject) => {
-        db.run(`UPDATE products SET current_stock = current_stock + ? WHERE id = ?`, [change, productId], function (err) {
-            if (err) return reject(err);
-            else {
-                const q = 'INSERT INTO stock_movements (product_id, change, reason) values (?,?,?)'
-                db.run(q, [productId, change, reason], function (err2) {
-                    if (err2) return reject(err2)
-                })
-                resolve({ productId, change });
-            }
-        });
-    });
-};
+            await connection.commit();
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        }
+    },
 
-const getProduct = (productId) => {
-    return new Promise((resolve, reject) => {
-        db.get(`SELECT * FROM products WHERE id = ?`, [productId], (err, result) => {
-            if (err) return reject(err);
-            resolve(result);
-        });
-    });
-};
+    async getStockMovements(storeId, productId) {
+        if (productId) {
 
-const getAllProduct = () => {
-    return new Promise((resolve, reject) => {
-        db.all(`SELECT * FROM products`, [], (err, result) => {
-            if (err) return reject(err);
-            resolve(result);
-        });
-    });
-};
+            const [rows] = await connection.query(
+                `SELECT * FROM stock_movements WHERE product_id = ? and store_id = ? ORDER BY movement_time DESC LIMIT 25`,
+                [productId, storeId]
+            );
+            return rows;
+        }
+        else {
+            const [rows] = await connection.query(
+                `SELECT * FROM stock_movements WHERE store_id = ? ORDER BY movement_time DESC LIMIT 25`,
+                [productId, storeId]
+            );
+            return rows;
+        }
+    },
 
-const getStockMovements = (productId) => {
-    return new Promise((resolve, reject) => {
-        db.all(`SELECT * FROM stock_movements WHERE product_id = ? ORDER BY timestamp DESC`, [productId], (err, result) => {
-            if (err) return reject(err);
-            resolve(result);
-        });
-    });
-};
-
-
-const removeAll = () => {
-    return new Promise((resolve, reject) => {
-        const q = 'DELETE FROM products; DELETE FROM stock_movements'
-        db.run(q, [], (err, result) => {
-            if (err) return reject(err)
-            else return resolve('All data removed')
-        })
-    })
-}
-
-const closeDatabase = () => {
-    db.close((err) => {
-        if (err) console.error(err.message);
-        else console.log('Database connection closed.');
-    });
-};
-
-const overStockedProducts = () => {
-    return new Promise((resolve, reject) => {
-        const q = ` SELECT p.id, t1.sales/t2.purchases as sToP from products p
+    async overStockedProducts(storeId, from, to, threshold = 0.3) {
+        const toDate = to || new Date();
+        const tempDate = new Date()
+        const fromDate = from || tempDate.setMonth(tempDate.getMonth() - 1);
+        const [rows] = await connection.query(
+            `SELECT p.id, t1.sales/t2.purchases as sToP from products p
             join (
-                select product_id, abs(sum(change) * 1.0) as sales from stock_movements where reason = \'sale\' and timestamp >= DATE(\'now\',\'-1 month\') group by product_id
+                select product_id, abs(sum(quantity_changed) * 1.0) as sales from stock_movements where store_id = ${storeId} and reason = 'sale' and movement_time >= ${fromDate} and movement_time <= ${toDate} group by product_id
             ) t1 on p.id = t1.product_id
             join (
-                select product_id, sum(change) * 1.0 as purchases from stock_movements where reason = \'stock-in\' and timestamp >= DATE(\'now\',\'-1 month\') group by product_id
+                select product_id, sum(quantity_changed) * 1.0 as purchases from stock_movements where store_id = ${storeId} and reason = \'stock-in\' and movement_time >= ${fromDate} and movement_time <= ${toDate} group by product_id
             ) t2 on p.id = t2.product_id
-             where sToP < 0.5
-             order by sToP desc LIMIT 5
-        `
+             where t1.sales/t2.purchases < ?
+             order by sToP desc LIMIT 5`,
+            [threshold]
+        );
+        return rows;
+    },
 
-        db.all(q, [], (err, result) => {
-            if (err) return reject(err)
-            else return resolve(result)
-        })
-    })
-}
+    async addStore(name, address) {
 
-module.exports = {
-    db,
-    addProduct,
-    updateStock,
-    getProduct,
-    getStockMovements,
-    closeDatabase,
-    getAllProduct,
-    removeAll,
-    overStockedProducts
+        const [result] = await connection.query('INSERT INTO stores (name,address) VALUES (?,?)', [name, address]);
+        return { id: result.insertId, name: name, address: address };
+
+    },
+
+    async removeAll() {
+        await connection.query(`DELETE FROM stock_movements`);
+        await connection.query(`DELETE FROM products`);
+    },
+
+    closeDatabase() {
+        db.end((err) => {
+            if (err) {
+                console.error('Error closing the database:', err);
+            } else {
+                console.log('Database connection closed.');
+            }
+        });
+    }
 };
+
+module.exports = { ...DB, connection };
