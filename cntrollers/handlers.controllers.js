@@ -20,9 +20,9 @@ module.exports.addTheProduct = async (req, res) => {
 
 module.exports.updateTheStock = async (req, res) => {
     try {
-        const { product_id, store_id, quantity_change, movement_type } = req.body;
+        const { product_id, store_id, quantity_change, movement_time } = req.body;
 
-        await db.updateStock(product_id, store_id, quantity_change, movement_type);
+        await db.updateStock(product_id, store_id, quantity_change, movement_time);
 
         res.status(200).json({ message: `Stock updated successfully for Product ID: ${product_id} in Store ID: ${store_id}` });
     } catch (error) {
@@ -32,8 +32,9 @@ module.exports.updateTheStock = async (req, res) => {
 
 module.exports.getTheProduct = async (req, res) => {
     try {
-        const { id, store_id } = req.query;
-        const product = await db.getProduct(id, store_id);
+        const { product_id, store_id } = req.query;
+        const product = await db.getProduct(product_id, store_id);
+
         // const stock = await db.getProductStockAcrossStores(id); // NEW: get total or per-store stock
         res.status(200).json({ product });
     } catch (error) {
@@ -65,12 +66,44 @@ module.exports.updateProduct = async (req, res) => {
 
 module.exports.getStockMovements = async (req, res) => {
     try {
-        const { store, product } = req.query;
-        const movements = await db.getStockMovements(store, product);
-        if (product)
-            res.status(200).json({ store, product, movements })
-        else
-            res.status(200).json({ store, movements });
+        const limit = 10
+        let { store_id, product_id, reason, to, from, page = 1 } = req.query;
+
+        page = parseInt(page)
+        if (page <= 0) return res.status(400).json({ message: 'Pages cannot be zero or less' })
+        const offset = (page - 1) * limit
+
+
+
+        if (product_id) {
+
+            const [[{ total }]] = await db.connection.query(`SELECT COUNT(*) as total FROM stock_movements WHERE product_id = ? and store_id = ? ${reason ? `AND reason = '${reason}'` : ''} ${from ? ` AND movement_time >= '${from}'` : ''} ${to ? ` AND movement_time <= '${to}'` : ''} ORDER BY movement_time DESC`, [product_id, store_id])
+            const totalPages = Math.ceil(total / limit)
+
+            const [rows] = await db.connection.query(
+                `SELECT * FROM stock_movements WHERE product_id = ? and store_id = ? ${reason ? `AND reason = '${reason}'` : ''} ${from ? ` AND movement_time >= '${from}'` : ''} ${to ? ` AND movement_time <= '${to}'` : ''} ORDER BY movement_time DESC LIMIT ? OFFSET ?`,
+                [product_id, store_id, limit, offset]
+            );
+            res.status(200).json({ total_pages: totalPages, hasMore: page < totalPages, limit, page, store_id, product_id, movements: rows })
+
+        }
+        else {
+
+            const [[{ total }]] = await db.connection.query(`SELECT COUNT(*) as total FROM stock_movements WHERE store_id = ? ${reason && `AND reason = '${reason}'`} ${from ? ` AND movement_time >= '${from}'` : ''} ${to ? ` AND movement_time <= '${to}'` : ''} ORDER BY movement_time DESC`, [product_id, store_id])
+            const totalPages = Math.ceil(total / limit)
+
+            const [rows] = await db.connection.query(
+                `SELECT * FROM stock_movements WHERE store_id = ? ${reason && `AND reason = '${reason}'`} ${from ? ` AND movement_time >= '${from}'` : ''} ${to ? ` AND movement_time <= '${to}'` : ''} ORDER BY movement_time DESC LIMIT ? OFFSET ?`,
+                [store_id, limit, offset]
+            );
+            res.status(200).json({ total_pages: totalPages, hasMore: page < totalPages, limit, page, store_id, movements: rows });
+
+        }
+
+        // if (product_id)
+        //     res.status(200).json({ store_id, product_id, movements })
+        // else
+        //     res.status(200).json({ store_id, movements });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -78,9 +111,22 @@ module.exports.getStockMovements = async (req, res) => {
 
 module.exports.getAllProducts = async (req, res) => {
     try {
-        const { store_id } = req.params;
-        const products = await db.getAllProduct(store_id);
-        res.status(200).json({ products });
+        const limit = 10
+        let { store_id, page = 1 } = req.query;
+
+        page = parseInt(page);
+
+        if (page <= 0) return res.status(400).json({ message: "Page number cannot be negative or zero" })
+        const offset = (page - 1) * limit;
+
+        const [rows] = await db.connection.query(`SELECT * FROM products p JOIN stocks s ON p.id = s.product_id where s.store_id = ? LIMIT ? OFFSET ?`, [store_id, limit, offset]);
+        const [[{ total }]] = await db.connection.query(`SELECT COUNT(*) as total FROM products p JOIN stocks s ON p.id = s.product_id`);
+
+        const totalPages = Math.ceil(total / limit);
+        const hasMore = totalPages > page
+
+        res.status(200).json({ total_pages: totalPages, page, limit, hasMore, products: rows });
+
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -95,11 +141,38 @@ module.exports.getAllProducts = async (req, res) => {
 //     }
 // };
 
+const formatDateForMySQL = (date) => {
+    return date.toISOString().slice(0, 19).replace("T", " ");
+};
+
+
+
 module.exports.getOverStockedProducts = async (req, res) => {
     try {
-        const { threshold = 0.3 } = req.query;
-        const products = await db.overStockedProducts(store, threshold);
-        res.status(200).json({ overStocked: products });
+        const { from, to, store_id, threshold = 0.3 } = req.query;
+
+        // const toDate = to || new Date();
+        let tempDate = new Date()
+        tempDate.setMonth(tempDate.getMonth() - 1)
+        // const fromDate = from || tempDate.setMonth(tempDate.getMonth() - 1);
+        const fromDate = formatDateForMySQL(from || tempDate);
+        const toDate = formatDateForMySQL(to || new Date());
+
+
+        const [rows] = await db.connection.query(
+            `SELECT p.id, t1.sales/t2.purchases as sToP from products p
+            join (
+                select product_id, abs(sum(quantity_changed) * 1.0) as sales from stock_movements where store_id = ${store_id} and reason = 'sale' and movement_time >= '${fromDate}' and movement_time <= '${toDate}' group by product_id
+            ) t1 on p.id = t1.product_id
+            join (
+                select product_id, sum(quantity_changed) * 1.0 as purchases from stock_movements where store_id = ${store_id} and reason = \'stock-in\' and movement_time >= '${fromDate}' and movement_time <= '${toDate}' group by product_id
+            ) t2 on p.id = t2.product_id
+             JOIN stocks s1 ON s1.product_id = p.id JOIN stores s2 ON s1.store_id = s2.id
+             where store_id = ${store_id} and t1.sales/t2.purchases < ${threshold}
+             order by sToP desc LIMIT 5`
+        );
+
+        res.status(200).json({ overStocked: rows });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -137,8 +210,8 @@ exports.removeStore = async (req, res) => {
 
 exports.updateStore = async (req, res) => {
     try {
-        const { store_id, name, location } = req.body;
-        await db.connection.query(`UPDATE stores SET name = ?, location = ? WHERE id = ?`, [name, location, store_id]);
+        const { store_id, name, address } = req.body;
+        await db.connection.query(`UPDATE stores SET name = ?, address = ? WHERE id = ?`, [name, address, store_id]);
         res.json({ message: 'Store updated' });
     } catch (err) {
         res.status(500).json({ message: err.message });

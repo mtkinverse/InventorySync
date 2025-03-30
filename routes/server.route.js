@@ -9,7 +9,7 @@ router.put('/store', updateStore)
 router.delete('/store', removeStore)
 router.post('/updateStock', updateTheStock)
 router.get('/product', getTheProduct)
-router.get('/stockMovements/:id', getStockMovements)
+router.get('/stockMovements', getStockMovements)
 router.get('/products', getAllProducts)
 router.get('/overStock', getOverStockedProducts)
 

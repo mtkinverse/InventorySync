@@ -33,7 +33,7 @@ const DB = {
             const [rows] = await connection.query(`SELECT * FROM products where id = ?  `, [productId]);
             return rows[0];
         } else {
-            const [rows] = await connection.query(`SELECT p.*,s1.name as store_name, s1.address as store_address FROM products p JOIN stocks s on s.product_id = p.id JOIN stores s1 on s1.id = s.store_id `, [productId]);
+            const [rows] = await connection.query(`SELECT p.*,s1.name as store_name, s1.address as store_address FROM products p JOIN stocks s on s.product_id = p.id JOIN stores s1 on s1.id = s.store_id where p.id = ? and s1.id = ? `, [productId, storeId]);
             return rows[0];
         }
     },
@@ -79,7 +79,7 @@ const DB = {
         else {
             const [rows] = await connection.query(
                 `SELECT * FROM stock_movements WHERE store_id = ? ORDER BY movement_time DESC LIMIT 25`,
-                [productId, storeId]
+                [storeId]
             );
             return rows;
         }
@@ -94,7 +94,7 @@ const DB = {
             join (
                 select product_id, abs(sum(quantity_changed) * 1.0) as sales from stock_movements where store_id = ${storeId} and reason = 'sale' and movement_time >= ${fromDate} and movement_time <= ${toDate} group by product_id
             ) t1 on p.id = t1.product_id
-            join (
+            join (  
                 select product_id, sum(quantity_changed) * 1.0 as purchases from stock_movements where store_id = ${storeId} and reason = \'stock-in\' and movement_time >= ${fromDate} and movement_time <= ${toDate} group by product_id
             ) t2 on p.id = t2.product_id
              where t1.sales/t2.purchases < ?
