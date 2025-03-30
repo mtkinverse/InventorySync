@@ -8,7 +8,9 @@ exports.signup = async (req, res) => {
     try {
         const { username, password, role, store_id } = req.body;
 
-        if (!['superadmin', 'storeadmin'].includes(role)) {
+        if (req.user.role != 'superadmin') return res.status(401).json({ message: 'Only admins can signup!' })
+
+        if (role != 'storeadmin') {
             return res.status(400).json({ message: 'Invalid role' });
         }
 
@@ -18,7 +20,10 @@ exports.signup = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const result = await db.run(
+        const existingUser = await db.connection.query('SELECT id FROM users WHERE username = ?', [username])
+        if (existingUser[0][0]) return res.status(400).json({ message: 'A user with the provided user name already exists' })
+
+        const result = await db.connection.query(
             `INSERT INTO users (username, password, role, store_id) VALUES (?, ?, ?, ?)`,
             [username, hashedPassword, role, role === 'storeadmin' ? store_id : null]
         );
@@ -33,8 +38,11 @@ exports.login = async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        const user = await db.get(`SELECT * FROM users WHERE username = ?`, [username]);
+        const userMeta = await db.connection.query(`SELECT * FROM users WHERE username = ?`, [username]);
+        const user = { ...userMeta[0][0] }
+        // console.log('username password and user', username, password, user)
         if (!user) return res.status(404).json({ message: 'User not found' });
+
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });

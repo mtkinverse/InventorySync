@@ -1,18 +1,22 @@
 const express = require('express');
 const app = express();
 const serverRoutes = require('./routes/server.route')
+const userRoutes = require('./routes/user.route')
 const cors = require('cors');
+const { auth } = require('./middlewares/auth');
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(serverRoutes);
-
 app.use(cors({
     origin: ['http://localhost:5173', 'http://127.0.0.1:5173']
 }));
+app.use(auth);
+app.use(serverRoutes);
+app.use(userRoutes);
+
 
 app.get('/', (req, res) => {
-    res.send('Hunt Data with data dungeon!');
+    res.send('This is server of the legend Taha khan!');
 });
 
 app.listen(PORT, () => {
