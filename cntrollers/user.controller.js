@@ -40,7 +40,10 @@ exports.login = async (req, res) => {
 
         const userMeta = await db.connection.query(`SELECT * FROM users WHERE username = ?`, [username]);
         const user = { ...userMeta[0][0] }
-        // console.log('username password and user', username, password, user)
+
+        if (!user) return res.status(400).json({message : 'Invalid Credentials'})
+        
+        // console.log('username password and user', username, password, user,userMeta)
         if (!user) return res.status(404).json({ message: 'User not found' });
 
 

@@ -46,7 +46,9 @@ CREATE TABLE users (
     store_id INTEGER, -- NULL for superadmin
     FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
 );
-
+select * from users;
+update users set username = 'superadmin';
+--insert into users (username,password,role,store_id) VALUES ('superadmin','$2b$10$j2brGcFFfmQkiHUhivmI6eORf3kLqXnsDhPes5r3K2nVY.7lujGza','superadmin',NULL);
 select * from products where id = 5;
 select * from stock_movements LIMIT 2 OFFSET 4;
 select * from products p join stocks s on s.product_id = p.id join stores s1 on s1.id = s.store_id where p.id = 5;
