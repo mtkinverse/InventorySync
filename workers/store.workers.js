@@ -1,7 +1,7 @@
 const db = require('../modules/db');
-const { eventEmitter } = require('../modules/eventBroker');
+const eventEmitter = require('../modules/eventBroker');
 const socket = require('../modules/socket.js');
-
+const cacheModal = require('../modules/cache.js')
 const io = socket.getIO();
 
 const sendError = (store_id, message) => {
@@ -11,8 +11,9 @@ const sendError = (store_id, message) => {
 // Handle product addition
 eventEmitter.on('add_product', async (data) => {
     try {
-        await db.addProduct(data.name, data.category, data.price, data.description, data.store_id, data.current_stock);
+        const porduct = await db.addProduct(data.name, data.category, data.price, data.description, data.store_id, data.current_stock);
         io.to(`store_${data.store_id}`).emit('product_added', { message: `Product ${data.name} added successfully.` });
+
     } catch (error) {
         sendError(data.store_id, error.message);
     }
@@ -21,7 +22,13 @@ eventEmitter.on('add_product', async (data) => {
 // Handle stock update
 eventEmitter.on('update_stock', async (data) => {
     try {
-        await db.updateStock(data.product_id, data.store_id, data.quantity_change, data.movement_time);
+
+        await db.updateStock(data.product_id, data.store_id, data.quantity_change, data.reason);
+
+        const cache = cacheModal.registerStore(data.store_id)
+        cache.dirty = true
+        cacheModal.cache.set(data.store_id, cache)
+
         io.to(`store_${data.store_id}`).emit('stock_updated', { message: `Stock updated for product ${data.product_id}` });
     } catch (error) {
         sendError(data.store_id, error.message);
@@ -31,10 +38,11 @@ eventEmitter.on('update_stock', async (data) => {
 // Handle product update
 eventEmitter.on('update_product', async (data) => {
     try {
-        const connection = db.getStoreShard(data.store_id);
+        const connection = db.getStoreShard(data.store_id, true);
         const [[product]] = await connection.query('SELECT * FROM products WHERE id = ?', [data.product_id]);
-
         if (!product) throw new Error('No such product exists');
+
+        const newProduct = [data.name || product.name, data.price || product.price, data.description || product.description, data.category || product.category, data.product_id]
 
         await connection.query(
             'UPDATE products SET name = ?, price = ?, description = ?, category = ? WHERE id = ?',
@@ -60,7 +68,7 @@ eventEmitter.on('add_store', async (data) => {
 // Handle store removal
 eventEmitter.on('remove_store', async (data) => {
     try {
-        const connection = db.getStoreShard(data.store_id);
+        const connection = db.getStoreShard(data.store_id, true);
         await connection.query('DELETE FROM stores WHERE id = ?', [data.store_id]);
         io.emit('store_removed', { message: `Store ID ${data.store_id} removed successfully.` });
     } catch (error) {
@@ -71,8 +79,12 @@ eventEmitter.on('remove_store', async (data) => {
 // Handle store update
 eventEmitter.on('update_store', async (data) => {
     try {
-        const connection = db.getStoreShard(data.store_id);
-        await connection.query('UPDATE stores SET name = ?, address = ? WHERE id = ?', [data.name, data.address, data.store_id]);
+        const connection = db.getStoreShard(data.store_id, true);
+        const [[store]] = await connection.query('SELECT * FROM stores where id = ?', [data.store_id])
+        if (!store) throw new Error('Required store not found!')
+
+        const newStore = [data.name || store.name, data.address || store.address, data.store_id]
+        await connection.query('UPDATE stores SET name = ?, address = ? WHERE id = ?', [...newStore]);
         io.emit('store_updated', { message: `Store ID ${data.store_id} updated successfully.` });
     } catch (error) {
         sendError(data.store_id, error.message);

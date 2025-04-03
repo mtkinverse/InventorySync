@@ -1,16 +1,23 @@
-class EventBroker { // Uisng class just to store memory internally, in the class
+class EventBroker {
     constructor() {
-        this.subscribers = {};
+        this.subscribers = {}; // Stores event handlers
     }
 
-    publish(event, data) {
+    async publish(event, data) {
         if (this.subscribers[event]) {
-            this.subscribers[event].forEach(handler => handler(data));
+            for (const handler of this.subscribers[event]) {
+                await handler(data); // Ensures async execution
+                // this.unsubscribe(event, handler);
+            }
         }
     }
 
-    emit(event, data) {
-        this.publish(event, data);
+    async emit(event, data) {
+        return this.publish(event, data);
+    }
+
+    on(event, handler) {
+        this.subscribe(event, handler);
     }
 
     subscribe(event, handler) {
@@ -22,10 +29,7 @@ class EventBroker { // Uisng class just to store memory internally, in the class
 
     unsubscribe(event, handler) {
         if (this.subscribers[event]) {
-            const index = this.subscribers[event].indexOf(handler);
-            if (index > -1) {
-                this.subscribers[event].splice(index, 1);
-            }
+            this.subscribers[event] = this.subscribers[event].filter(h => h !== handler);
         }
     }
 }

@@ -6,7 +6,7 @@ CREATE DATABASE IF NOT EXISTS inventory2;
 USE Inventory2;
 CREATE DATABASE IF NOT EXISTS inventory3;
 USE Inventory3;
-
+select * from products;
 CREATE TABLE products (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255),
@@ -37,7 +37,7 @@ CREATE TABLE stocks (
   FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
 );
 
-
+select * from stock_movements;
 CREATE TABLE stores (
   id INT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,

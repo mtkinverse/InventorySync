@@ -3,19 +3,27 @@ require('dotenv').config();
 
 const centralDB = mysql.createPool({
     host: 'localhost',
-    user: 'root',
-    password: 'tktkah',
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
     database: 'centralInventory'
 }).promise();
 
-const shards = [
-    mysql.createPool({ host: 'localhost', user: 'root', password: 'tktkah', database: 'inventory1' }),
-    mysql.createPool({ host: 'localhost', user: 'root', password: 'tktkah', database: 'inventory2' }),
-    mysql.createPool({ host: 'localhost', user: 'root', password: 'tktkah', database: 'inventory3' })
+
+const writers = [
+    mysql.createPool({ host: process.env.PRIMARY_DB1, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: 'inventory1', connectionLimit: 10 }),
+    mysql.createPool({ host: process.env.PRIMARY_DB2, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: 'inventory2', connectionLimit: 10 }),
+    mysql.createPool({ host: process.env.PRIMARY_DB3, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: 'inventory3', connectionLimit: 10 })
 ].map(db => db.promise());
 
-function getStoreShard(store_id) {
-    return shards[store_id % shards.length];
+const shards = [
+    mysql.createPool({ host: process.env.REPLICA_DB1, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: 'inventory1', connectionLimit: 10 }),
+    mysql.createPool({ host: process.env.REPLICA_DB2, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: 'inventory2', connectionLimit: 10 }),
+    mysql.createPool({ host: process.env.REPLICA_DB3, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: 'inventory3', connectionLimit: 10 })
+].map(db => db.promise());
+
+function getStoreShard(store_id, writer = false) {
+    if (writer) return writers[store_id % writers.length]
+    else return shards[store_id % shards.length];
 }
 
 async function getNextStoreId() {
@@ -40,7 +48,7 @@ async function updateNextStoreId(lastUsedId) {
 const DB = {
     async addStore(name, address) {
         const storeId = await getNextStoreId();
-        const shard = getStoreShard(storeId);
+        const shard = getStoreShard(storeId, true);
 
         const [result] = await shard.query('INSERT INTO stores (id, name, address) VALUES (?, ?, ?)', [storeId, name, address]);
         await updateNextStoreId(storeId);
@@ -50,7 +58,7 @@ const DB = {
 
     async addProduct(name, category, price, description, store_id, current_stock) {
 
-        const connection = await getStoreShard(store_id).getConnection();
+        const connection = await getStoreShard(store_id, true).getConnection();
 
         try {
 
@@ -71,6 +79,7 @@ const DB = {
 
             // Commit transaction
             await connection.commit();
+
             return { id: productId, name, category, price, description, current_stock };
         } catch (error) {
             await connection.rollback();
@@ -78,7 +87,7 @@ const DB = {
         }
     },
 
-    async getAllProducts(storeId) {
+    async getAllProducts(storeId, page = 1) {
         const connection = getStoreShard(storeId);
         const [rows] = await connection.query(
             `SELECT p.*, s.stock FROM products p
@@ -98,7 +107,7 @@ const DB = {
              FROM products p 
              JOIN stocks s ON s.product_id = p.id 
              JOIN stores st ON st.id = s.store_id 
-             WHERE p.id = ? AND s.store_id = ?`,
+             ${productId ? 'WHERE p.id = ? AND' : ''} s.store_id = ?`,
             [productId, storeId]
         );
 
@@ -107,7 +116,7 @@ const DB = {
 
     async updateStock(productId, storeId, quantityChange, reason) {
 
-        const connection = await getStoreShard(storeId).getConnection();
+        const connection = await getStoreShard(storeId, true).getConnection();
         await connection.beginTransaction();
 
         try {
@@ -153,27 +162,31 @@ const DB = {
 
     async overStockedProducts(storeId, from, to, threshold = 0.3) {
         const connection = getStoreShard(storeId);
-        const fromDate = from || new Date(new Date().setMonth(new Date().getMonth() - 1));
-        const toDate = to || new Date();
+        // const tempDate = new Date()
+        // tempDate.setMonth(tempDate.getMonth() - 1)
+        // const fromDate = from || tempDate;
+        // const toDate = to || new Date();
+        // console.log('whattttt ', storeId, fromDate, toDate, threshold);
 
-        const [rows] = await connection.query(
-            `SELECT p.id, (t1.sales / t2.purchases) AS sToP
+        const q = `SELECT p.id, (t1.sales / t2.purchases) AS sToP
              FROM products p
              JOIN (
                  SELECT product_id, ABS(SUM(quantity_changed)) AS sales 
                  FROM stock_movements 
-                 WHERE store_id = ? AND reason = 'sale' AND movement_time BETWEEN ? AND ? 
+                 WHERE store_id = ? AND reason = 'sale' ${from ? `AND movement_time >= '${from}'` : ''} ${to ? `AND movement_time <= '${to}'` : ''}
                  GROUP BY product_id
              ) t1 ON p.id = t1.product_id
              JOIN (
                  SELECT product_id, SUM(quantity_changed) AS purchases 
                  FROM stock_movements 
-                 WHERE store_id = ? AND reason = 'stock-in' AND movement_time BETWEEN ? AND ? 
+                 WHERE store_id = ? AND reason = 'stock-in' ${from ? `AND movement_time >= '${from}'` : ''} ${to ? `AND movement_time <= '${to}'` : ''}
                  GROUP BY product_id
              ) t2 ON p.id = t2.product_id
              WHERE (t1.sales / t2.purchases) < ?
-             ORDER BY sToP DESC LIMIT 5`,
-            [storeId, fromDate, toDate, storeId, fromDate, toDate, threshold]
+             ORDER BY sToP DESC LIMIT 5`
+        const [rows] = await connection.query(
+            q,
+            [storeId, storeId, threshold]
         );
 
         return rows;

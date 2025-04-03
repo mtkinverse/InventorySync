@@ -7,11 +7,15 @@ const cors = require('cors');
 const { auth } = require('./middlewares/auth');
 const PORT = process.env.PORT;
 
+const cacheModal = require('./modules/cache')
 const socket = require('./modules/socket')
 
 const http = require('http');
 const server = http.createServer(app);
 const io = socket.init(server)
+const workers = require('./workers/store.workers')
+
+
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
