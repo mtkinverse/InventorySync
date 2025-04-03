@@ -11,7 +11,7 @@ const limiter = rateLimit({
 	// store: new RedisStore({
 	// 	sendCommand: (...args) => redisClient.sendCommand(args),
 	// }),
-	windowMs: 60 * 1000, 
+	windowMs: 60 * 1000,
 	limit: 3,
 	keyGenerator: (req) => `${req.user?.id}` || `${req.ip}`,
 	standardHeaders: 'draft-8',

@@ -1,130 +1,198 @@
 const mysql = require('mysql2');
 require('dotenv').config();
 
-const db = mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME
-});
+const centralDB = mysql.createPool({
+    host: 'localhost',
+    user: 'root',
+    password: 'tktkah',
+    database: 'centralInventory'
+}).promise();
 
-const connection = db.promise();
+const shards = [
+    mysql.createPool({ host: 'localhost', user: 'root', password: 'tktkah', database: 'inventory1' }),
+    mysql.createPool({ host: 'localhost', user: 'root', password: 'tktkah', database: 'inventory2' }),
+    mysql.createPool({ host: 'localhost', user: 'root', password: 'tktkah', database: 'inventory3' })
+].map(db => db.promise());
+
+function getStoreShard(store_id) {
+    return shards[store_id % shards.length];
+}
+
+async function getNextStoreId() {
+    const [rows] = await centralDB.query(`SELECT next_id FROM tracker where entity = 0 order by next_id`);
+
+    let nextId = 0;
+    if (rows.length > 0) {
+        nextId = rows[0].next_id;
+        await updateNextStoreId(nextId)
+        // await centralDB.query('UPDATE tracker set next_id = ? where next_id = ?',[nextId + 1, nextId])
+    } else {
+        await centralDB.query(`INSERT INTO tracker (entity, next_id) VALUES (0, ?)`, [1]);
+    }
+
+    return nextId;
+}
+
+async function updateNextStoreId(lastUsedId) {
+    await centralDB.query(`UPDATE tracker SET next_id = ? where next_id = ? and entity = 0`, [lastUsedId + 1, lastUsedId]);
+}
 
 const DB = {
-    async addProduct(name, category, price, description, store_id, current_stock) {
-        const [result] = await connection.query(
-            `INSERT INTO products (name, category, price, description) VALUES (?, ?, ?, ?)`,
-            [name, category, price, description]
-        );
+    async addStore(name, address) {
+        const storeId = await getNextStoreId();
+        const shard = getStoreShard(storeId);
 
-        const [movement_id] = await connection.query('INSERT INTO stocks (product_id, store_id, stock) VALUES (?, ?, ?)', [result.insertId, store_id, current_stock])
+        const [result] = await shard.query('INSERT INTO stores (id, name, address) VALUES (?, ?, ?)', [storeId, name, address]);
+        await updateNextStoreId(storeId);
 
-        const [rows] = await connection.query(`SELECT * FROM products WHERE id = ?`, [result.insertId]);
-        return rows[0];
+        return { id: storeId, name, address };
     },
 
-    async getAllProduct(storeId) {
-        const [rows] = await connection.query(`SELECT * FROM products p JOIN stocks s ON p.id = s.product_id where s.store_id = ?`, [storeId]);
+    async addProduct(name, category, price, description, store_id, current_stock) {
+
+        const connection = await getStoreShard(store_id).getConnection();
+
+        try {
+
+            await connection.beginTransaction();
+            // Insert product (ID auto-increment handled by MySQL)
+            const [productResult] = await connection.query(
+                `INSERT INTO products (name, category, price, description) VALUES (?, ?, ?, ?)`,
+                [name, category, price, description]
+            );
+
+            const productId = productResult.insertId;
+
+            // Insert stock
+            await connection.query(
+                `INSERT INTO stocks (product_id, store_id, stock) VALUES (?, ?, ?)`,
+                [productId, store_id, current_stock]
+            );
+
+            // Commit transaction
+            await connection.commit();
+            return { id: productId, name, category, price, description, current_stock };
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        }
+    },
+
+    async getAllProducts(storeId) {
+        const connection = getStoreShard(storeId);
+        const [rows] = await connection.query(
+            `SELECT p.*, s.stock FROM products p
+             JOIN stocks s ON p.id = s.product_id 
+             WHERE s.store_id = ?`,
+            [storeId]
+        );
         return rows;
     },
 
     async getProduct(productId, storeId) {
-        if (!storeId) {
-            const [rows] = await connection.query(`SELECT * FROM products where id = ?  `, [productId]);
-            return rows[0];
-        } else {
-            const [rows] = await connection.query(`SELECT p.*,s1.name as store_name, s1.address as store_address FROM products p JOIN stocks s on s.product_id = p.id JOIN stores s1 on s1.id = s.store_id where p.id = ? and s1.id = ? `, [productId, storeId]);
-            return rows[0];
-        }
+        if (!storeId) return undefined;
+
+        const connection = getStoreShard(storeId);
+        const [rows] = await connection.query(
+            `SELECT p.*, s.stock, st.name AS store_name, st.address AS store_address 
+             FROM products p 
+             JOIN stocks s ON s.product_id = p.id 
+             JOIN stores st ON st.id = s.store_id 
+             WHERE p.id = ? AND s.store_id = ?`,
+            [productId, storeId]
+        );
+
+        return rows[0] || null;
     },
 
     async updateStock(productId, storeId, quantityChange, reason) {
+
+        const connection = await getStoreShard(storeId).getConnection();
+        await connection.beginTransaction();
+
         try {
-            await connection.beginTransaction();
+            // Fetch current stock
+            const [[stock]] = await connection.query(
+                `SELECT stock FROM stocks WHERE product_id = ? AND store_id = ?`,
+                [productId, storeId]
+            );
 
-            const [[product]] = await connection.query(`SELECT * FROM products WHERE id = ?`, [productId]);
-            if (!product) throw new Error('Product not found');
+            if (!stock) throw new Error('Stock entry not found');
 
-            const [[stock]] = await connection.query('SELECT * from stocks where product_id = ? and store_id = ?', [productId, storeId])
-            console.log('found stock ', stock)
             const newStock = parseInt(stock.stock) + parseInt(quantityChange);
             if (newStock < 0) throw new Error('Insufficient stock');
 
-            // console.log('updating product to ', { ...product, current_stock: newStock })
-            // await connection.query(`UPDATE products SET current_stock = ? WHERE id = ?`, [newStock, productId]);
+            // Update stock
+            await connection.query(
+                `UPDATE stocks SET stock = ? WHERE store_id = ? AND product_id = ?`,
+                [newStock, storeId, productId]
+            );
 
-            await connection.query(`UPDATE stocks SET stock = ? WHERE store_id = ? and product_id = ?`, [newStock, storeId, productId]);
-
+            // Insert stock movement
             await connection.query(
                 `INSERT INTO stock_movements (product_id, store_id, quantity_changed, reason) VALUES (?, ?, ?, ?)`,
                 [productId, storeId, quantityChange, reason]
             );
 
             await connection.commit();
-        } catch (err) {
+        } catch (error) {
             await connection.rollback();
-            throw err;
+            throw error;
         }
     },
 
-    async getStockMovements(storeId, productId) {
-        if (productId) {
+    async getStockMovements(storeId, productId = null) {
+        const connection = getStoreShard(storeId);
+        const query = productId
+            ? `SELECT * FROM stock_movements WHERE product_id = ? AND store_id = ? ORDER BY movement_time DESC LIMIT 25`
+            : `SELECT * FROM stock_movements WHERE store_id = ? ORDER BY movement_time DESC LIMIT 25`;
 
-            const [rows] = await connection.query(
-                `SELECT * FROM stock_movements WHERE product_id = ? and store_id = ? ORDER BY movement_time DESC LIMIT 25`,
-                [productId, storeId]
-            );
-            return rows;
-        }
-        else {
-            const [rows] = await connection.query(
-                `SELECT * FROM stock_movements WHERE store_id = ? ORDER BY movement_time DESC LIMIT 25`,
-                [storeId]
-            );
-            return rows;
-        }
-    },
-
-    async overStockedProducts(storeId, from, to, threshold = 0.3) {
-        const toDate = to || new Date();
-        const tempDate = new Date()
-        const fromDate = from || tempDate.setMonth(tempDate.getMonth() - 1);
-        const [rows] = await connection.query(
-            `SELECT p.id, t1.sales/t2.purchases as sToP from products p
-            join (
-                select product_id, abs(sum(quantity_changed) * 1.0) as sales from stock_movements where store_id = ${storeId} and reason = 'sale' and movement_time >= ${fromDate} and movement_time <= ${toDate} group by product_id
-            ) t1 on p.id = t1.product_id
-            join (  
-                select product_id, sum(quantity_changed) * 1.0 as purchases from stock_movements where store_id = ${storeId} and reason = \'stock-in\' and movement_time >= ${fromDate} and movement_time <= ${toDate} group by product_id
-            ) t2 on p.id = t2.product_id
-             where t1.sales/t2.purchases < ?
-             order by sToP desc LIMIT 5`,
-            [threshold]
-        );
+        const [rows] = await connection.query(query, productId ? [productId, storeId] : [storeId]);
         return rows;
     },
 
-    async addStore(name, address) {
+    async overStockedProducts(storeId, from, to, threshold = 0.3) {
+        const connection = getStoreShard(storeId);
+        const fromDate = from || new Date(new Date().setMonth(new Date().getMonth() - 1));
+        const toDate = to || new Date();
 
-        const [result] = await connection.query('INSERT INTO stores (name,address) VALUES (?,?)', [name, address]);
-        return { id: result.insertId, name: name, address: address };
+        const [rows] = await connection.query(
+            `SELECT p.id, (t1.sales / t2.purchases) AS sToP
+             FROM products p
+             JOIN (
+                 SELECT product_id, ABS(SUM(quantity_changed)) AS sales 
+                 FROM stock_movements 
+                 WHERE store_id = ? AND reason = 'sale' AND movement_time BETWEEN ? AND ? 
+                 GROUP BY product_id
+             ) t1 ON p.id = t1.product_id
+             JOIN (
+                 SELECT product_id, SUM(quantity_changed) AS purchases 
+                 FROM stock_movements 
+                 WHERE store_id = ? AND reason = 'stock-in' AND movement_time BETWEEN ? AND ? 
+                 GROUP BY product_id
+             ) t2 ON p.id = t2.product_id
+             WHERE (t1.sales / t2.purchases) < ?
+             ORDER BY sToP DESC LIMIT 5`,
+            [storeId, fromDate, toDate, storeId, fromDate, toDate, threshold]
+        );
 
+        return rows;
     },
 
     async removeAll() {
-        await connection.query(`DELETE FROM stock_movements`);
-        await connection.query(`DELETE FROM products`);
+        for (const shard of shards) {
+            await shard.query(`DELETE FROM stock_movements`);
+            await shard.query(`DELETE FROM products`);
+        }
     },
 
-    closeDatabase() {
-        db.end((err) => {
-            if (err) {
-                console.error('Error closing the database:', err);
-            } else {
-                console.log('Database connection closed.');
-            }
-        });
+    async closeDatabase() {
+        for (const db of shards) {
+            await db.end();
+        }
+        await centralDB.end();
+        console.log('Database connections closed.');
     }
 };
 
-module.exports = { ...DB, connection };
+module.exports = { ...DB, getStoreShard, centralDB };

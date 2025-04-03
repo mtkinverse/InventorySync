@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "start-pm2": "pm2 start index.js --name 'server1' --env PORT=3000 && pm2 start index.js --name 'server2' --env PORT=3001 && pm2 start index.js --name 'server3' --env PORT=3002",
+    "stop-pm2": "pm2 stop all && pm2 delete all"
   },
   "keywords": [],
   "author": "",

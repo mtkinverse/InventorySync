@@ -1,5 +1,12 @@
-CREATE DATABASE IF NOT EXISTS inventorySystem;
-USE inventorySystem;
+CREATE DATABASE IF NOT EXISTS centralInventory;
+USE centralInventory;
+CREATE DATABASE IF NOT EXISTS inventory1;
+USE Inventory1;
+CREATE DATABASE IF NOT EXISTS inventory2;
+USE Inventory2;
+CREATE DATABASE IF NOT EXISTS inventory3;
+USE Inventory3;
+
 
 CREATE TABLE products (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -33,19 +40,32 @@ CREATE TABLE stocks (
 
 
 CREATE TABLE stores (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id INT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   address TEXT
 );
+
+CREATE INDEX idx_stock_movements_time ON stock_movements(movement_time);
+
+-- Central DB schemas
 
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) UNIQUE,
     password TEXT,
-    role VARCHAR(12) CHECK(role IN ('superadmin', 'storeadmin')) NOT NULL,
     store_id INTEGER, -- NULL for superadmin
+    role VARCHAR(12) CHECK(role IN ('superadmin', 'storeadmin')) NOT NULL,
     FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
 );
+
+
+CREATE TABLE tracker (
+	entity INT NOT NULL,
+    next_id INT NOT NULL
+);
+
+insert into tracker values (0,0) , (1,0);
+
 select * from users;
 update users set username = 'superadmin';
 --insert into users (username,password,role,store_id) VALUES ('superadmin','$2b$10$j2brGcFFfmQkiHUhivmI6eORf3kLqXnsDhPes5r3K2nVY.7lujGza','superadmin',NULL);
