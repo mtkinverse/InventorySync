@@ -3,6 +3,11 @@ const authFreeRoutes = ['', 'login']
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
 module.exports.auth = (req, res, next) => {
+
+    if (req.upgrade) {
+        return next(); // For WebSockets
+    }
+
     const path = req.path.split('/')[1]
 
     if ((path && authFreeRoutes.includes(path)) || (req.body.passkey && req.body.passkey == JWT_SECRET)) return next()

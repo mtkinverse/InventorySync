@@ -7,7 +7,6 @@ USE Inventory2;
 CREATE DATABASE IF NOT EXISTS inventory3;
 USE Inventory3;
 
-
 CREATE TABLE products (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255),

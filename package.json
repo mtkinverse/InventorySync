@@ -21,6 +21,9 @@
     "express-rate-limit": "^7.5.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.14.0",
+    "rate-limiter-flexible": "^6.2.1",
+    "redis": "^4.7.0",
+    "socket.io": "^4.8.1",
     "sqlite3": "^5.1.7"
   }
 }

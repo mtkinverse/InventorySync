@@ -7,6 +7,13 @@ const cors = require('cors');
 const { auth } = require('./middlewares/auth');
 const PORT = process.env.PORT;
 
+const socket = require('./modules/socket')
+
+const http = require('http');
+const server = http.createServer(app);
+const io = socket.init(server)
+
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cors({
     origin: ['http://localhost:5173', 'http://127.0.0.1:5173']
@@ -21,6 +28,20 @@ app.get('/', (req, res) => {
     res.send('This is server of the legend Taha khan!');
 });
 
-app.listen(PORT, () => {
+
+io.on("connection", (socket) => {
+    console.log(`Client ${socket.id} connected as user ${socket.user.id}`);
+
+    socket.on("subscribe", (store_id) => {
+        socket.join(`store_${store_id}`);
+        console.log(`User ${socket.user.id} subscribed to store ${store_id}`);
+    });
+
+    socket.on("disconnect", () => {
+        console.log(`Client ${socket.id} disconnected`);
+    });
+});
+
+server.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
