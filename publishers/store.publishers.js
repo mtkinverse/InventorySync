@@ -25,7 +25,6 @@ module.exports.getTheProduct = async (req, res) => {
     try {
         const { product_id, store_id } = req.query;
         const product = await db.getProduct(product_id, store_id);
-        console.log('got product ', product);
 
         res.status(200).json({ product });
     } catch (error) {
@@ -41,6 +40,15 @@ module.exports.updateProduct = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+module.exports.removeTheProduct = async (req,res) => {
+    try{
+        eventEmitter.emit('remove_product',req.body)
+        res.status(200).json({ message: 'Product delete event published successfully' });
+    }catch (err){
+        res.status(500).json({ message: err.message });
+    }
+}
 
 module.exports.getStockMovements = async (req, res) => {
     try {

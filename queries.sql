@@ -6,12 +6,13 @@ CREATE DATABASE IF NOT EXISTS inventory2;
 USE Inventory2;
 CREATE DATABASE IF NOT EXISTS inventory3;
 USE Inventory3;
-select * from products;
+drop database inventory2;
+select * from stocks;
+
 CREATE TABLE products (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255),
   category VARCHAR(255),
-  price DECIMAL(10, 2),
   description TEXT
 );
 
@@ -19,12 +20,13 @@ CREATE TABLE stock_movements (
   id INT AUTO_INCREMENT PRIMARY KEY,
   product_id INT,
   store_id INT,
+  stock_id INT,
   quantity_changed INT,
   reason VARCHAR(255),
   movement_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
-  FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
-
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
+  FOREIGN KEY (stock_id) REFERENCES stocks(id) ON DELETE SET NULL
 );
 
 CREATE TABLE stocks (
@@ -32,7 +34,9 @@ CREATE TABLE stocks (
   product_id INT,
   store_id INT,
   stock INT DEFAULT 0,
-  UNIQUE (product_id, store_id),
+  price DECIMAL(10, 2) NOT NULL,
+  unit VARCHAR(10) NOT NULL,
+  UNIQUE(product_id, store_id, unit, price),
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
   FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
 );

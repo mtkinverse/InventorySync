@@ -11,20 +11,28 @@ const sendError = (store_id, message) => {
 // Handle product addition
 eventEmitter.on('add_product', async (data) => {
     try {
-        const porduct = await db.addProduct(data.name, data.category, data.price, data.description, data.store_id, data.current_stock);
-        io.to(`store_${data.store_id}`).emit('product_added', { message: `Product ${data.name} added successfully.` });
-
+        
+        const product = await db.addProduct(data.name, data.category, data.price, data.description, data.store_id, data.current_stock, data.unit);
+        if(product === undefined)
+            sendError(data.store_id, 'Something went wrong while adding product')
+        else io.to(`store_${data.store_id}`).emit('product_added', { message: `Product ${data.name} added successfully.` });
+        
     } catch (error) {
         sendError(data.store_id, error.message);
     }
 });
 
+eventEmitter.on('remove_product', async (data) => {
+    await db.removeProduct(data.product_id, data.store_id)
+    io.to(`store_${data.store_id}`).emit('product_removed', { message: `Product ${data.name} removed successfully.` });
+})
+
 // Handle stock update
 eventEmitter.on('update_stock', async (data) => {
     try {
 
-        await db.updateStock(data.product_id, data.store_id, data.quantity_change, data.reason);
-
+        const res = await db.updateStock(data.product_id, data.store_id, data.quantity_change, data.reason, data.isnew, data.price, data.unit);
+        if (res === undefined) throw new Error('Unable to update stock')
         const cache = cacheModal.registerStore(data.store_id)
         cache.dirty = true
         cacheModal.cache.set(data.store_id, cache)
@@ -42,11 +50,11 @@ eventEmitter.on('update_product', async (data) => {
         const [[product]] = await connection.query('SELECT * FROM products WHERE id = ?', [data.product_id]);
         if (!product) throw new Error('No such product exists');
 
-        const newProduct = [data.name || product.name, data.price || product.price, data.description || product.description, data.category || product.category, data.product_id]
+        const newProduct = [data.name || product.name, data.description || product.description, data.category || product.category, data.product_id]
 
         await connection.query(
-            'UPDATE products SET name = ?, price = ?, description = ?, category = ? WHERE id = ?',
-            [data.name || product.name, data.price || product.price, data.description || product.description, data.category || product.category, data.product_id]
+            'UPDATE products SET name = ?, description = ?, category = ? WHERE id = ?',
+            [data.name || product.name,  data.description || product.description, data.category || product.category, data.product_id]
         );
 
         io.to(`store_${data.store_id}`).emit('product_updated', { message: 'Product updated successfully.' });
