@@ -23,7 +23,7 @@ app.use(cors({
     origin: ['http://localhost:5173', 'http://127.0.0.1:5173']
 }));
 app.use(auth);
-// app.use(rateLimiter)
+app.use(rateLimiter)
 app.use(serverRoutes);
 app.use(userRoutes);
 

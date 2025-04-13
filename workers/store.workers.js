@@ -8,15 +8,34 @@ const sendError = (store_id, message) => {
     io.to(`store_${store_id}`).emit('errorsss', { message });
 };
 
-// Handle product addition
 eventEmitter.on('add_product', async (data) => {
     try {
-        
+
         const product = await db.addProduct(data.name, data.category, data.price, data.description, data.store_id, data.current_stock, data.unit);
-        if(product === undefined)
+        if (product === undefined)
             sendError(data.store_id, 'Something went wrong while adding product')
         else io.to(`store_${data.store_id}`).emit('product_added', { message: `Product ${data.name} added successfully.` });
-        
+
+    } catch (error) {
+        sendError(data.store_id, error.message);
+    }
+});
+
+// Handle product update
+eventEmitter.on('update_product', async (data) => {
+    try {
+        const connection = db.getStoreShard(data.store_id, true);
+        const [[product]] = await connection.query('SELECT * FROM products WHERE id = ?', [data.product_id]);
+        if (!product) throw new Error('No such product exists');
+
+        const newProduct = [data.name || product.name, data.description || product.description, data.category || product.category, data.product_id]
+
+        await connection.query(
+            'UPDATE products SET name = ?, description = ?, category = ? WHERE id = ?',
+            [data.name || product.name, data.description || product.description, data.category || product.category, data.product_id]
+        );
+
+        io.to(`store_${data.store_id}`).emit('product_updated', { message: 'Product updated successfully.' });
     } catch (error) {
         sendError(data.store_id, error.message);
     }
@@ -38,26 +57,6 @@ eventEmitter.on('update_stock', async (data) => {
         cacheModal.cache.set(data.store_id, cache)
 
         io.to(`store_${data.store_id}`).emit('stock_updated', { message: `Stock updated for product ${data.product_id}` });
-    } catch (error) {
-        sendError(data.store_id, error.message);
-    }
-});
-
-// Handle product update
-eventEmitter.on('update_product', async (data) => {
-    try {
-        const connection = db.getStoreShard(data.store_id, true);
-        const [[product]] = await connection.query('SELECT * FROM products WHERE id = ?', [data.product_id]);
-        if (!product) throw new Error('No such product exists');
-
-        const newProduct = [data.name || product.name, data.description || product.description, data.category || product.category, data.product_id]
-
-        await connection.query(
-            'UPDATE products SET name = ?, description = ?, category = ? WHERE id = ?',
-            [data.name || product.name,  data.description || product.description, data.category || product.category, data.product_id]
-        );
-
-        io.to(`store_${data.store_id}`).emit('product_updated', { message: 'Product updated successfully.' });
     } catch (error) {
         sendError(data.store_id, error.message);
     }

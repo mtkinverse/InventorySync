@@ -32,7 +32,7 @@ async function getNextStoreId() {
     let nextId = 0;
     if (rows.length > 0) {
         nextId = rows[0].next_id;
-        if (rows.length > 1) await centralDB.query('DELETE FROM tracker WHERE next_id = ? AND entity = 0',[nextId])
+        if (rows.length > 1) await centralDB.query('DELETE FROM tracker WHERE next_id = ? AND entity = 0', [nextId])
         else await updateNextStoreId(nextId)
         // await centralDB.query('UPDATE tracker set next_id = ? where next_id = ?',[nextId + 1, nextId])
     } else {
@@ -87,28 +87,18 @@ const DB = {
             return { id: productId, name, category, price, description, current_stock };
         } catch (error) {
             await connection.rollback();
-            console.log('error ',error.message);
-            
+            console.log('error ', error.message);
+
             return undefined;
         }
     },
 
-    async removeProduct(product_id, store_id){
-        if(store_id === undefined) throw Error('Store id not provided')
+    async removeProduct(product_id, store_id) {
+        if (store_id === undefined) throw Error('Store id not provided')
         const connection = getStoreShard(store_id, true);
         await connection.query('DELETE FROM products WHERE id = ?', product_id);
     },
-    
-    // async getAllProducts(storeId, page = 1) {
-    //     const connection = getStoreShard(storeId);
-    //     const [rows] = await connection.query(
-    //         `SELECT p.*, s.stock FROM products p
-    //          JOIN stocks s ON p.id = s.product_id 
-    //          WHERE s.store_id = ?`,
-    //         [storeId]
-    //     );
-    //     return rows;
-    // },
+
 
     async getProduct(productId, storeId) {
         if (storeId === undefined) return [];
@@ -143,13 +133,13 @@ const DB = {
             if (!stock) throw new Error('Stock entry not found');
 
             dealingStock = stock.id;
-            
+
             const newStock = isnew ? 0 : parseInt(stock.stock) + parseInt(quantityChange);
             if (newStock < 0) throw new Error('Insufficient stock');
 
             // Update stock
-            if(isnew){
-                const [result] = await connection.query(`INSERT INTO stocks (product_id, store_id, stock, price, unit) VALUES (?, ?, ?, ?, ?)`,[productId,storeId, newStock,price, unit ]);
+            if (isnew) {
+                const [result] = await connection.query(`INSERT INTO stocks (product_id, store_id, stock, price, unit) VALUES (?, ?, ?, ?, ?)`, [productId, storeId, newStock, price, unit]);
                 dealingStock = result.insertId
             }
             else await connection.query(
@@ -167,20 +157,10 @@ const DB = {
 
         } catch (error) {
             await connection.rollback();
-            console.log('error in updating stock ',error.message);
+            console.log('error in updating stock ', error.message);
             return undefined;
         }
     },
-
-    // async getStockMovements(storeId, productId = null) {
-    //     const connection = getStoreShard(storeId);
-    //     const query = productId
-    //         ? `SELECT * FROM stock_movements WHERE product_id = ? AND store_id = ? ORDER BY movement_time DESC LIMIT 25`
-    //         : `SELECT * FROM stock_movements WHERE store_id = ? ORDER BY movement_time DESC LIMIT 25`;
-
-    //     const [rows] = await connection.query(query, productId ? [productId, storeId] : [storeId]);
-    //     return rows;
-    // },
 
     async overStockedProducts(storeId, from, to, threshold = 0.3) {
         const connection = getStoreShard(storeId);
@@ -212,13 +192,6 @@ const DB = {
         );
 
         return rows;
-    },
-
-    async removeAll() {
-        for (const shard of shards) {
-            await shard.query(`DELETE FROM stock_movements`);
-            await shard.query(`DELETE FROM products`);
-        }
     },
 
     async closeDatabase() {

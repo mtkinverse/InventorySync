@@ -1,21 +1,12 @@
 const db = require('../modules/db');
 const eventEmitter = require('../modules/eventBroker');
 const cacheModal = require('../modules/cache')
+
 module.exports.addTheProduct = async (req, res) => {
     try {
         const eventData = req.body;
         eventEmitter.emit('add_product', eventData);
         res.status(200).json({ message: 'Product addition event published successfully' });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
-module.exports.updateTheStock = async (req, res) => {
-    try {
-        const eventData = req.body;
-        eventEmitter.emit('update_stock', eventData);
-        res.status(200).json({ message: 'Stock update event published successfully' });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -41,14 +32,24 @@ module.exports.updateProduct = async (req, res) => {
     }
 };
 
-module.exports.removeTheProduct = async (req,res) => {
-    try{
-        eventEmitter.emit('remove_product',req.body)
+module.exports.removeTheProduct = async (req, res) => {
+    try {
+        eventEmitter.emit('remove_product', req.body)
         res.status(200).json({ message: 'Product delete event published successfully' });
-    }catch (err){
+    } catch (err) {
         res.status(500).json({ message: err.message });
     }
 }
+
+module.exports.updateTheStock = async (req, res) => {
+    try {
+        const eventData = req.body;
+        eventEmitter.emit('update_stock', eventData);
+        res.status(200).json({ message: 'Stock update event published successfully' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
 
 module.exports.getStockMovements = async (req, res) => {
     try {
@@ -86,10 +87,6 @@ module.exports.getStockMovements = async (req, res) => {
 
         }
 
-        // if (product_id)
-        //     res.status(200).json({ store_id, product_id, movements })
-        // else
-        //     res.status(200).json({ store_id, movements });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
