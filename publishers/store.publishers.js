@@ -34,7 +34,7 @@ module.exports.updateProduct = async (req, res) => {
 
 module.exports.removeTheProduct = async (req, res) => {
     try {
-        eventEmitter.emit('remove_product', req.body)
+        eventEmitter.emit('remove_product', req.query)
         res.status(200).json({ message: 'Product delete event published successfully' });
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -147,7 +147,7 @@ module.exports.addTheStore = async (req, res) => {
 
 module.exports.removeStore = async (req, res) => {
     try {
-        eventEmitter.emit('remove_store', req.params);
+        eventEmitter.emit('remove_store', req.query);
         res.status(200).json({ message: 'Store removal event published successfully' });
     } catch (error) {
         res.status(500).json({ message: error.message });

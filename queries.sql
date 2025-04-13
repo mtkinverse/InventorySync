@@ -22,7 +22,7 @@ CREATE TABLE stock_movements (
   store_id INT,
   stock_id INT,
   quantity_changed INT,
-  reason VARCHAR(255),
+  reason VARCHAR(255) CHECK (reason IN ('sales', 'stock-in', 'removed')),
   movement_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
   FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
@@ -33,8 +33,8 @@ CREATE TABLE stocks (
   id INT AUTO_INCREMENT PRIMARY KEY,
   product_id INT,
   store_id INT,
-  stock INT DEFAULT 0,
-  price DECIMAL(10, 2) NOT NULL,
+  stock INT DEFAULT 0 CHECK (stock >= 0),
+  price DECIMAL(10, 2) NOT NULL CHECK (price > 0),
   unit VARCHAR(10) NOT NULL,
   UNIQUE(product_id, store_id, unit, price),
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
@@ -55,7 +55,7 @@ CREATE INDEX idx_stock_movements_time ON stock_movements(movement_time);
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) UNIQUE,
-    password TEXT,
+    password VARCHAR(100),
     store_id INTEGER, -- NULL for superadmin
     role VARCHAR(12) CHECK(role IN ('superadmin', 'storeadmin')) NOT NULL,
     FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
